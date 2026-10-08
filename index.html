@@ -228,6 +228,35 @@
   .row em { color:#fff; }
   .row b { color:#FBBF24; font-size:20px; }
   .navbtm { background:#021C1B; }
+
+  /* ================= Animations (top promo + bottom bar) ================= */
+  :root { --glow: rgba(251,191,36,.65); }
+  /* ထိပ်ပိုင်း */
+  .top .logo   { animation: logoPulse 2.4s ease-in-out infinite; }
+  .top .arrow  { animation: arrowNudge 1s ease-in-out infinite; }
+  .promo       { animation: promoGlow 2.2s ease-in-out infinite; }
+  /* အောက်ခြေ */
+  .bottom .logo { animation: logoBounce 1.8s ease-in-out infinite; }
+  .bottom h2   { animation: titlePulse 2s ease-in-out infinite; transform-origin: left center; }
+  .subscribe   { position: relative; overflow: hidden; animation: subPulse 1.6s ease-in-out infinite; }
+  .subscribe::after {
+    content: ""; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+    background: linear-gradient(120deg, transparent, rgba(255,255,255,.55), transparent);
+    transform: skewX(-20deg); animation: shine 2.6s ease-in-out infinite;
+  }
+  .bell i { display: inline-block; font-style: normal; transform-origin: 50% 10%; animation: ring 2.6s ease-in-out infinite; }
+
+  @keyframes logoPulse  { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+  @keyframes logoBounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes arrowNudge { 0%,100% { transform: translateX(0); } 50% { transform: translateX(16px); } }
+  @keyframes promoGlow  { 0%,100% { transform: scale(1); text-shadow: 0 0 0 transparent; }
+                          50% { transform: scale(1.03); text-shadow: 0 0 14px var(--glow); } }
+  @keyframes titlePulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  @keyframes subPulse   { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  @keyframes shine      { 0%,55% { left: -60%; } 100% { left: 130%; } }
+  @keyframes ring { 0%,60%,100% { transform: rotate(0); } 10% { transform: rotate(16deg); } 20% { transform: rotate(-14deg); }
+                   30% { transform: rotate(12deg); } 40% { transform: rotate(-9deg); } 50% { transform: rotate(5deg); } }
+  @media (prefers-reduced-motion: reduce) { .top *, .bottom *, .promo, .subscribe::after { animation: none !important; } }
 </style>
 </head>
 <body>
@@ -273,7 +302,7 @@
       <div class="bottom">
         <div class="logo">2D</div>
         <h2>2D3D Live</h2>
-        <div class="subscribe"><span class="bell">🔔</span>SUBSCRIBE</div>
+        <div class="subscribe"><span class="bell"><i>🔔</i></span>SUBSCRIBE</div>
       </div>
     </main>
 
