@@ -257,6 +257,21 @@
   @keyframes ring { 0%,60%,100% { transform: rotate(0); } 10% { transform: rotate(16deg); } 20% { transform: rotate(-14deg); }
                    30% { transform: rotate(12deg); } 40% { transform: rotate(-9deg); } 50% { transform: rotate(5deg); } }
   @media (prefers-reduced-motion: reduce) { .top *, .bottom *, .promo, .subscribe::after { animation: none !important; } }
+
+  /* ================= Bigger phone (main focus) ================= */
+  .wrap  { grid-template-columns: 1fr 400px; gap: 30px; padding: 12px 40px; }
+  .phone { width: 400px; height: 744px; border-width: 14px; border-radius: 56px; }
+  .phone .notch { width: 110px; height: 28px; top: 10px; }
+  .phone .bar   { height: 90px; font-size: 24px; padding-bottom: 8px; }
+  .big     { font-size: 180px; margin-top: 26px; }
+  .updated { font-size: 14px; margin: 6px 0 20px; }
+  .box     { margin: 0 16px 14px; padding: 16px 18px; border-radius: 14px; }
+  .box .h  { font-size: 19px; padding-bottom: 6px; }
+  .row     { padding-top: 16px; }
+  .row small { font-size: 13px; }
+  .row em  { font-size: 20px; }
+  .row b   { font-size: 34px; }
+  .navbtm  { height: 48px; }
 </style>
 </head>
 <body>
