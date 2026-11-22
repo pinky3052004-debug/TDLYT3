@@ -1,0 +1,46 @@
+name: Make Post Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "12:01 | 16:30"
+        type: choice
+        options: ["12:01", "16:30"]
+        default: "12:01"
+      force:
+        description: "ပိတ်ရက်/စနေ တနင်္ဂနွေမှာလည်း စမ်းမယ် (test)"
+        type: boolean
+        default: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-core
+
+      - name: Make post image
+        run: python3 make_post.py "${{ inputs.slot }}" ${{ inputs.force && '--force' || '' }}
+
+      - name: Save image
+        if: hashFiles('posts/*.png') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-${{ inputs.slot == '12:01' && '1201' || '1630' }}-${{ github.run_number }}
+          path: |
+            posts/*.png
+            posts/*.txt
+
+      - name: Send to Telegram (ရွေးချယ်စရာ)
+        if: hashFiles('posts/*.png') != '' && env.TG_TOKEN != ''
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          f=$(ls posts/*.png | head -1)
+          curl -s -F chat_id="$TG_CHAT" -F photo=@"$f" -F caption="$(cat "${f%.png}.txt")" \
+            "https://api.telegram.org/bot$TG_TOKEN/sendPhoto" >/dev/null

@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+concurrency:                     # cron နှစ်ခါခေါ်မိရင် live ၂ ခု မဖြစ်စေရန်
+  group: live-${{ inputs.session }}
+  cancel-in-progress: false
+
 jobs:
   stream:
     runs-on: ubuntu-latest
@@ -19,33 +23,57 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check market holiday          # ပိတ်ရက်/စနေ တနင်္ဂနွေဆိုရင် အောက်က အဆင့်အားလုံး ကျော်
+        id: check
+        env:
+          SESSION: ${{ inputs.session }}
+        run: python3 live.py --check-holiday
+
       - name: Install tools
+        if: steps.check.outputs.skip != 'true'
         run: sudo apt-get update && sudo apt-get install -y xvfb ffmpeg fonts-noto-core
 
       - name: Run live
+        if: steps.check.outputs.skip != 'true'
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           SESSION: ${{ inputs.session }}
+          YT_UPLOAD_CLIP: "1"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}   # ရွေးချယ်စရာ (error သတင်းပို့ရန်)
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python3 server.py &
           export DISPLAY=:99
           Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &
-          sleep 2
-          google-chrome --no-sandbox --disable-gpu --disable-dev-shm-usage --kiosk \
-            --window-position=0,0 --window-size=1280,720 --disable-web-security \
-            --user-data-dir=/tmp/chrome --no-first-run --no-default-browser-check \
-            --disable-translate --disable-features=Translate,TranslateUI \
-            --disable-infobars --disable-notifications --disable-session-crashed-bubble \
-            "http://localhost:8080/index.html" >/dev/null 2>&1 &
-          sleep 10
+          sleep 1
+          # Chrome ပျက်ရင် အလိုအလျောက် ပြန်ဖွင့်
+          ( while true; do
+              google-chrome --no-sandbox --disable-gpu --disable-dev-shm-usage --kiosk \
+                --window-position=0,0 --window-size=1280,720 --disable-web-security \
+                --user-data-dir=/tmp/chrome --no-first-run --no-default-browser-check \
+                --disable-translate --disable-features=Translate,TranslateUI \
+                --disable-infobars --disable-notifications --disable-session-crashed-bubble \
+                "http://localhost:8080/index.html"
+              sleep 2
+            done ) >/dev/null 2>&1 &
+          sleep 6
           python3 live.py
 
       - name: Save state for evening run
-        if: always() && inputs.session != 'test'
+        if: always() && inputs.session != 'test' && steps.check.outputs.skip != 'true'
         run: |
           git config user.name "live-bot"
           git config user.email "live-bot@users.noreply.github.com"
           git add state/state.json
           git diff --cached --quiet || (git commit -m "state $(date -u +%F)" && git pull --rebase && git push)
+
+      - name: Save clip (download လုပ်ယူရန်)
+        if: always() && steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clips
+          path: clips/*.mp4
+          if-no-files-found: ignore
+          retention-days: 7

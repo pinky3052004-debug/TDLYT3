@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="my" translate="no">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1024px; height: 1024px; }
+  body {
+    font-family: "Noto Sans Myanmar", Arial, sans-serif; color: #2b1500; font-weight: 700;
+    background: radial-gradient(circle at 50% 45%, #f7d655 0%, #e2ac22 70%, #cf9714 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    padding: 44px 40px; text-align: center;
+  }
+  .date { font: 800 72px Arial, sans-serif; }
+  .label { font-size: 38px; margin-bottom: 6px; }
+  .big { font: 800 150px/1.05 Arial, sans-serif; letter-spacing: 2px; }
+  .big.pairs { font-size: 124px; }
+  .note {
+    width: 100%; background: rgba(255,255,255,.6); border: 4px solid #2b1500; border-radius: 22px;
+    padding: 22px 26px; font-size: 33px; line-height: 1.6;
+  }
+  .note small { display: block; font-size: 29px; margin-top: 6px; }
+  .brand { font: 800 44px Arial, sans-serif; }
+</style>
+</head>
+<body>
+  <div class="date">{{DATE}} ({{SLOT}})</div>
+  <div>
+    <div class="label">ကီးထိပ်</div>
+    <div class="big">{{D1}}. {{D2}}. {{D3}}</div>
+  </div>
+  <div>
+    <div class="label">ဒဲ့ထိုးကြပါ</div>
+    <div class="big pairs">{{P1}}*{{P2}}.{{P3}}</div>
+  </div>
+  <div class="note">
+    🍀{{WEEKDAY}}မှစ၍ ကံကောင်းကြပါစေ🍀
+    <small>လက်မနှိပ်သူတိုင်း ငွေဝင်ပါစေ</small>
+  </div>
+  <div class="brand">2D3D Live</div>
+</body>
+</html>

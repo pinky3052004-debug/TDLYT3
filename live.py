@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """YouTube broadcast ဖန်တီး + ffmpeg နဲ့ stream (မနက်/ညနေ ၂ ကြိမ် × ၃ channel title)"""
-import os, json, time, glob, shutil, subprocess, urllib.request, urllib.parse, urllib.error
+import os, re, sys, json, time, glob, shutil, signal, subprocess, urllib.request, urllib.parse, urllib.error
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -239,67 +239,160 @@ def at(day, hhmm):
     h, m = map(int, hhmm.split(":"))
     return datetime(day.year, day.month, day.day, h, m, tzinfo=MMT)
 
+HOLIDAY_FILE = os.path.join(BASE, "holidays.txt")
+
+def load_holidays():
+    """holidays.txt -> {date: မှတ်စု}   (DD/MM/YYYY သို့ YYYY-MM-DD ကို လိုင်းအစမှာ ရှာ၊ # နဲ့စတာ ကျော်)"""
+    out = {}
+    try:
+        lines = open(HOLIDAY_FILE, encoding="utf-8").read().splitlines()
+    except OSError:
+        print("holidays.txt မတွေ့ -> ပိတ်ရက်စစ်ခြင်း မလုပ်", flush=True)
+        return out
+    for ln in lines:
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})\s*(.*)", ln)
+        try:
+            if m:
+                d = datetime(int(m[3]), int(m[2]), int(m[1])).date(); note = m[4]
+            else:
+                m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})\s*(.*)", ln)
+                if not m:
+                    continue
+                d = datetime(int(m[1]), int(m[2]), int(m[3])).date(); note = m[4]
+            out[d] = note.lstrip("- ").strip()
+        except ValueError:
+            print("holidays.txt: ရက်စွဲမှားနေ ->", ln, flush=True)
+    return out
+
+def holiday_reason(day):
+    """ဈေးကွက်ပိတ်ရက်ဆိုရင် အကြောင်းပြချက်၊ မဟုတ်ရင် None"""
+    if day.weekday() >= 5:
+        return "စနေ/တနင်္ဂနွေ (ဈေးကွက်ပိတ်)"
+    return load_holidays().get(day.date())
+
+def notify(msg, error=True):
+    """GitHub log (အနီရောင် error) + Telegram (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID ထည့်ထားရင်)"""
+    print(("::error::" if error else "::notice::") + msg, flush=True)
+    tok, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    if tok and chat:
+        try:
+            data = urllib.parse.urlencode({"chat_id": chat, "text": "2D Live: " + msg}).encode()
+            urllib.request.urlopen(f"https://api.telegram.org/bot{tok}/sendMessage", data, timeout=15)
+        except Exception:
+            pass
+
+def retry(fn, tries=3, wait=5):
+    for i in range(tries):
+        try:
+            return fn()
+        except Exception as e:
+            print(f"attempt {i + 1}/{tries} failed: {e}", flush=True)
+            if i < tries - 1:
+                time.sleep(wait)
+    return None
+
+def run_until(cmd, seconds):
+    """cmd ကို run၊ seconds ပြည့်တာနဲ့ ချက်ချင်းရပ်။ (returncode, ကိုယ်ရပ်လိုက်လား) ပြန်"""
+    p = subprocess.Popen(cmd, env=dict(os.environ, TZ="UTC"))
+    try:
+        return p.wait(timeout=max(1, seconds)), False
+    except subprocess.TimeoutExpired:
+        p.send_signal(signal.SIGINT)               # ffmpeg ကို သန့်သန့်ရပ်ခိုင်း
+        try:
+            p.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            p.kill(); p.wait()
+        return p.returncode, True
+
 def run_session(s, day):
     now = datetime.now(MMT)
     if TEST:
         end = now + timedelta(minutes=5)
     else:
-        start, end = at(day, s["start"]), at(day, s["end"])
+        end = at(day, s["end"])
+        print(f"မြန်မာအချိန် အခု {now:%H:%M:%S} | {s['label']} live ကို ချက်ချင်းစ၊ {s['end']} မှာ အတိအကျရပ်", flush=True)
         if now >= end:
-            print("skip", s["label"]); return
-        if now < start:
-            time.sleep((start - now).total_seconds())
+            print("skip: session ကုန်ပြီးသား", flush=True); return 0
+
     broadcasts = []
     for suf in SUFFIXES:
-        try:
-            broadcasts.append(create_broadcast(("TEST " if TEST else "") + make_title(day, s, suf)))
-        except Exception as e:
-            print("create failed:", e, flush=True)
+        b = retry(lambda: create_broadcast(("TEST " if TEST else "") + make_title(day, s, suf)))
+        if b:
+            broadcasts.append(b)
     if not broadcasts:
-        return
-    dur = max(60, int((end - datetime.now(MMT)).total_seconds()))
+        notify("Broadcast မဆောက်နိုင်ပါ (YouTube API / token စစ်ပါ)")
+        return 1
+
     shutil.rmtree(REC_DIR, ignore_errors=True); os.makedirs(REC_DIR)
-    outs = [f"[f=flv:onfail=ignore]{b['url']}" for b in broadcasts]          # encode တစ်ခါတည်း၊ output ၃ ခု
+    outs = [f"[f=flv:onfail=ignore]{b['url']}" for b in broadcasts]
     outs.append(f"[f=segment:segment_time=60:segment_format=mpegts:strftime=1:reset_timestamps=1:onfail=ignore]{REC_DIR}/%Y%m%d_%H%M%S.ts")
     tee = "|".join(outs)
     run_start = datetime.now(timezone.utc)
     audio = audio_input()
-    fails = 0
-    while True:
-        left = int((end - datetime.now(MMT)).total_seconds())
-        if left < 20:
-            break
-        t0 = time.time()
-        r = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "warning",
-            "-f", "x11grab", "-draw_mouse", "0", "-framerate", "30", "-video_size", "1280x720", "-i", ":99",
-            *audio,
-            "-map", "0:v", "-map", "1:a",
-            "-c:v", "libx264", "-preset", "veryfast", "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "6000k",
-            "-pix_fmt", "yuv420p", "-g", "60", "-af", AUDIO_FILTER, "-c:a", "aac", "-b:a", "128k",
-            "-flags", "+global_header", "-t", str(left), "-f", "tee", tee],
-            env=dict(os.environ, TZ="UTC"))
-        if r.returncode == 0:
-            break                                  # အချိန်ပြည့်လို့ ပုံမှန်ပြီး
-        fails += 1
-        print(f"ffmpeg exited rc={r.returncode} after {int(time.time()-t0)}s (fail #{fails})", flush=True)
-        if audio is not SILENT:
-            print("-> အသံတိတ်နဲ့ ပြန်ကြိုးစား", flush=True)
-            audio = SILENT
-        if fails >= 5:
-            break
-        time.sleep(5)
-    for b in broadcasts:
-        complete(b["id"])
+    quick_fails, restarts, streamed = 0, 0, 0.0
     try:
-        clip_and_upload(s, day, run_start)      # 11:59-12:02 ကို ဖြတ် -> video အသစ် (တစ်ခုတည်း)
+        while True:
+            left = int((end - datetime.now(MMT)).total_seconds())
+            if left <= 2:
+                break                                      # အချိန်ပြည့်ပြီ
+            t0 = time.time()
+            rc, stopped = run_until(["ffmpeg", "-hide_banner", "-loglevel", "warning",
+                "-f", "x11grab", "-draw_mouse", "0", "-framerate", "30", "-video_size", "1280x720", "-i", ":99",
+                *audio, "-map", "0:v", "-map", "1:a",
+                "-c:v", "libx264", "-preset", "veryfast", "-b:v", "3000k", "-maxrate", "3000k", "-bufsize", "6000k",
+                "-pix_fmt", "yuv420p", "-g", "60", "-af", AUDIO_FILTER, "-c:a", "aac", "-b:a", "128k",
+                "-flags", "+global_header", "-t", str(left), "-f", "tee", tee], left + 2)
+            ran = time.time() - t0
+            streamed += ran
+            if rc == 0 or stopped:
+                break                                      # ပုံမှန်ပြီး / အချိန်ပြည့်လို့ ရပ်လိုက်
+            restarts += 1
+            quick_fails = quick_fails + 1 if ran < 15 else 0
+            print(f"ffmpeg ရပ်သွား rc={rc} ({int(ran)}s) -> restart #{restarts}", flush=True)
+            if restarts == 1:
+                notify("ffmpeg ရပ်သွား၊ ပြန်စနေပါတယ်")
+            if audio is not SILENT:
+                audio = SILENT                             # audio ပြဿနာဖြစ်နိုင် -> အသံတိတ်နဲ့
+            if quick_fails >= 5:
+                break                                      # ချက်ချင်းပျက်နေ၊ ဆက်မကြိုးစားတော့
+            time.sleep(3)
+    finally:
+        for b in broadcasts:
+            complete(b["id"])
+
+    failed = streamed < 30 and not TEST
+    if failed:
+        notify("Live မတက်နိုင်ပါ (ffmpeg ထပ်ခါထပ်ခါ ပျက်) - Actions log ကိုကြည့်ပါ")
+    try:
+        clip_and_upload(s, day, run_start)
     except Exception as e:
         print("clip failed:", e, flush=True)
+    return 1 if failed else 0
 
 if __name__ == "__main__":
     day = datetime.now(MMT)
-    if TEST:   # test ဆိုရင် လက်ရှိအချိန်နဲ့ကိုက်တဲ့ session ကို ရွေး (13:30 မတိုင်ခင် = မနက်၊ ပြီးရင် ညနေ)
+    reason = None if TEST else holiday_reason(day)           # test ဆိုရင် ပိတ်ရက်ကို မစစ်
+    if "--check-holiday" in sys.argv:                        # workflow အစမှာ ခေါ်၊ ပိတ်ရက်ဆိုရင် အားလုံးကျော်
+        print(f"{day:%d/%m/%Y}: " + (f"ပိတ်ရက် - {reason}" if reason else "ဈေးကွက်ဖွင့်ရက်"), flush=True)
+        if os.environ.get("GITHUB_OUTPUT"):
+            with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                f.write("skip=" + ("true" if reason else "false") + "\n")
+        sys.exit(0)
+    if reason:
+        notify(f"{day:%d/%m/%Y} ဈေးကွက်ပိတ်ရက် ({reason}) -> live မလွှင့်ပါ", error=False)
+        sys.exit(0)
+    if TEST:   # test: လက်ရှိအချိန်နဲ့ကိုက်တဲ့ session (13:30 မတိုင်ခင် = မနက်၊ ပြီးရင် ညနေ)
         names = ["morning"] if day.hour * 60 + day.minute < 13 * 60 + 30 else ["evening"]
     else:
         names = [SESSION]
-    for s in [x for x in SESSIONS if x["name"] in names]:
-        run_session(s, day)
+    code = 0
+    try:
+        for s in [x for x in SESSIONS if x["name"] in names]:
+            code = run_session(s, day) or code
+    except Exception as e:
+        notify(f"မမျှော်လင့်တဲ့ error: {e}")
+        code = 1
+    sys.exit(code)
